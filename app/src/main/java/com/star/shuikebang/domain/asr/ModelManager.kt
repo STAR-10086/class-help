@@ -33,7 +33,8 @@ class ModelManager @Inject constructor(
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .callTimeout(300, TimeUnit.SECONDS)
         .build()
 
     private val modelsDir: File
@@ -80,7 +81,13 @@ class ModelManager @Inject constructor(
             Result.success(modelsDir.absolutePath)
         } catch (e: Exception) {
             Log.e(TAG, "Model download failed", e)
-            _downloadState.value = DownloadState.Error(e.message ?: "下载失败")
+            val msg = when {
+                e.message?.contains("HTTP") == true -> "网络请求失败: ${e.message}"
+                e.message?.contains("timeout", true) == true -> "下载超时，请检查网络连接"
+                e.message?.contains("connect", true) == true -> "无法连接到下载服务器，请检查网络"
+                else -> "模型下载失败: ${e.message}"
+            }
+            _downloadState.value = DownloadState.Error(msg)
             Result.failure(e)
         }
     }
@@ -92,7 +99,7 @@ class ModelManager @Inject constructor(
         val response = client.newCall(request).execute()
 
         if (!response.isSuccessful) {
-            throw RuntimeException("HTTP ${response.code}: $url")
+            throw RuntimeException("HTTP ${response.code}: 下载 ${targetFile.name} 失败")
         }
 
         val body = response.body ?: throw RuntimeException("Empty response body")
