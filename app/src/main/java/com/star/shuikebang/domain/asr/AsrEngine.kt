@@ -9,6 +9,11 @@ import com.k2fsa.sherpa.onnx.OnlineZipformer2CtcModelConfig
 import javax.inject.Inject
 import javax.inject.Singleton
 
+data class AsrResult(
+    val text: String,
+    val isFinal: Boolean = true
+)
+
 /**
  * 基于 sherpa-onnx OnlineRecognizer 的真流式 ASR 引擎。
  *
@@ -53,7 +58,7 @@ class AsrEngine @Inject constructor() {
     }
 
     /**
-     * 喂入一段音频，返回识别结果列表。
+     * 喂入一段音频，返回识别结果。
      * 如果检测到句尾断句，返回该句最终文本并自动 reset stream。
      *
      * @param samples 16kHz 16bit PCM 转换后的 float 数组
