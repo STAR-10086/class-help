@@ -24,13 +24,19 @@ sealed class DownloadState {
 }
 
 /**
- * 管理 Zipformer-small-CTC 流式模型的下载和存储。
+ * 管理 Zipformer-Transducer 双语流式模型的下载和存储。
  *
- * 模型来源: https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01
+ * 模型: sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20
+ * 来源: https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20
+ *
  * 文件结构 (解压后):
- *   sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01/
- *     ├── model.int8.onnx   (~15 MB)
+ *   sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/
+ *     ├── encoder-epoch-99-avg-1.int8.onnx  (~65MB)
+ *     ├── decoder-epoch-99-avg-1.onnx       (~2MB)
+ *     ├── joiner-epoch-99-avg-1.int8.onnx   (~10MB)
  *     └── tokens.txt
+ *
+ * 优势: 有标点、断句准确、中英双语、真流式 endpoint detection
  */
 @Singleton
 class ModelManager @Inject constructor(
@@ -49,18 +55,19 @@ class ModelManager @Inject constructor(
     private val modelsDir: File
         get() = File(context.filesDir, "models")
 
-    // Streaming Zipformer-small-CTC INT8 (Chinese)
-    private val modelName = "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01"
+    private val modelName = "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
     private val archiveUrl =
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$modelName.tar.bz2"
 
     fun isModelReady(): Boolean {
-        val model = File(modelsDir, "$modelName/model.int8.onnx")
-        val tokens = File(modelsDir, "$modelName/tokens.txt")
-        return model.exists() && tokens.exists()
+        val dir = File(modelsDir, modelName)
+        return File(dir, "encoder-epoch-99-avg-1.int8.onnx").exists() &&
+                File(dir, "decoder-epoch-99-avg-1.onnx").exists() &&
+                File(dir, "joiner-epoch-99-avg-1.int8.onnx").exists() &&
+                File(dir, "tokens.txt").exists()
     }
 
-    /** Returns the absolute path to the directory containing model.int8.onnx and tokens.txt */
+    /** Returns the absolute path to the model directory */
     fun getModelDir(): String = File(modelsDir, modelName).absolutePath
 
     suspend fun ensureModelReady(): Result<String> = withContext(Dispatchers.IO) {
@@ -76,18 +83,16 @@ class ModelManager @Inject constructor(
             if (!targetDir.exists()) {
                 _downloadState.value = DownloadState.Downloading(0, "下载语音模型...")
 
-                // Download tar.bz2 archive
                 val archiveFile = File(modelsDir, "$modelName.tar.bz2")
                 downloadFile(archiveUrl, archiveFile)
 
-                // Extract
                 _downloadState.value = DownloadState.Downloading(100, "解压模型文件...")
                 extractTarBz2(archiveFile, modelsDir)
                 archiveFile.delete()
             }
 
             if (!isModelReady()) {
-                throw RuntimeException("模型文件不完整: 缺少 model.int8.onnx 或 tokens.txt")
+                throw RuntimeException("模型文件不完整")
             }
 
             _downloadState.value = DownloadState.Ready

@@ -5,7 +5,7 @@ import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
-import com.k2fsa.sherpa.onnx.OnlineZipformer2CtcModelConfig
+import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -17,8 +17,10 @@ data class AsrResult(
 /**
  * 基于 sherpa-onnx OnlineRecognizer 的真流式 ASR 引擎。
  *
- * 使用 Zipformer-small-CTC-INT8 中文流式模型，持续接收音频，
- * 实时输出识别文本，模型自动检测句尾断句（endpoint detection）。
+ * 使用 Zipformer-Transducer 双语流式模型 (INT8)：
+ * - encoder.int8.onnx + decoder.onnx + joiner.int8.onnx + tokens.txt
+ * - 中英双语，有标点，断句准确
+ * - 模型自带 endpoint detection 自动断句
  *
  * 流程: AudioRecord → acceptWaveform() → decode() → getResult()
  *       → isEndpoint() → 如果是句尾: 取结果, reset stream
@@ -37,14 +39,16 @@ class AsrEngine @Inject constructor() {
 
         val config = OnlineRecognizerConfig(
             modelConfig = OnlineModelConfig(
-                zipformer2Ctc = OnlineZipformer2CtcModelConfig(
-                    model = "$modelDir/model.int8.onnx"
+                transducer = OnlineTransducerModelConfig(
+                    encoder = "$modelDir/encoder-epoch-99-avg-1.int8.onnx",
+                    decoder = "$modelDir/decoder-epoch-99-avg-1.onnx",
+                    joiner = "$modelDir/joiner-epoch-99-avg-1.int8.onnx",
                 ),
                 tokens = "$modelDir/tokens.txt",
                 numThreads = 2,
                 provider = "cpu",
                 debug = false,
-                modelType = "zipformer2"
+                modelType = "zipformer"
             ),
             enableEndpoint = true,
             decodingMethod = "greedy_search"
@@ -54,7 +58,7 @@ class AsrEngine @Inject constructor() {
         stream = recognizer!!.createStream()
 
         isInitialized = true
-        Log.i(TAG, "Streaming ASR engine initialized")
+        Log.i(TAG, "Streaming ASR engine initialized (Zipformer Transducer)")
     }
 
     /**
@@ -70,21 +74,17 @@ class AsrEngine @Inject constructor() {
 
         currentStream.acceptWaveform(samples, SAMPLE_RATE)
 
-        // 持续解码直到没有更多数据
         while (currentRecognizer.isReady(currentStream)) {
             currentRecognizer.decode(currentStream)
         }
 
-        // 检查是否检测到句尾（endpoint）
         if (currentRecognizer.isEndpoint(currentStream)) {
             val result = currentRecognizer.getResult(currentStream)
             if (result.text.isNotBlank()) {
                 callback(AsrResult(text = result.text.trim(), isFinal = true))
             }
-            // 重置 stream 以开始下一句
             currentRecognizer.reset(currentStream)
         } else {
-            // 非句尾时，也输出当前的部分识别结果（中间结果）
             val result = currentRecognizer.getResult(currentStream)
             if (result.text.isNotBlank()) {
                 callback(AsrResult(text = result.text.trim(), isFinal = false))
