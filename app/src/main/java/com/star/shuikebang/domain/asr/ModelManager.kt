@@ -10,16 +10,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
 sealed class DownloadState {
     data object NotDownloaded : DownloadState()
-    data class Downloading(val progress: Int, val bytesDownloaded: Long, val totalBytes: Long) : DownloadState()
+    data class Downloading(val progress: Int, val fileName: String = "") : DownloadState()
     data object Ready : DownloadState()
     data class Error(val message: String) : DownloadState()
 }
@@ -33,30 +34,33 @@ class ModelManager @Inject constructor(
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .callTimeout(300, TimeUnit.SECONDS)
+        .readTimeout(300, TimeUnit.SECONDS)
+        .callTimeout(600, TimeUnit.SECONDS)
+        .followRedirects(true)
         .build()
 
     private val modelsDir: File
         get() = File(context.filesDir, "models")
 
-    private val modelFiles = listOf(
-        ModelFile(
-            name = "silero_vad.onnx",
-            url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
-        ),
-        ModelFile(
-            name = "model.int8.onnx",
-            url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/model.int8.onnx"
-        ),
-        ModelFile(
-            name = "tokens.txt",
-            url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt"
-        )
+    // VAD model: single file download
+    private val vadFile = ModelDownload(
+        name = "silero_vad.onnx",
+        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
     )
 
+    // SenseVoice: tar.bz2 archive
+    private val senseVoiceArchive = ModelDownload(
+        name = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2",
+        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2"
+    )
+
+    private val senseVoiceDir = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+
     fun isModelReady(): Boolean {
-        return modelFiles.all { File(modelsDir, it.name).exists() }
+        val vad = File(modelsDir, vadFile.name)
+        val model = File(modelsDir, "$senseVoiceDir/model.int8.onnx")
+        val tokens = File(modelsDir, "$senseVoiceDir/tokens.txt")
+        return vad.exists() && model.exists() && tokens.exists()
     }
 
     fun getModelDir(): String = modelsDir.absolutePath
@@ -70,11 +74,23 @@ class ModelManager @Inject constructor(
         modelsDir.mkdirs()
 
         try {
-            for (modelFile in modelFiles) {
-                val targetFile = File(modelsDir, modelFile.name)
-                if (targetFile.exists()) continue
+            // Step 1: Download VAD model (single file)
+            val vadTarget = File(modelsDir, vadFile.name)
+            if (!vadTarget.exists()) {
+                _downloadState.value = DownloadState.Downloading(0, "silero_vad.onnx")
+                downloadFile(vadFile.url, vadTarget)
+            }
 
-                downloadFile(modelFile.url, targetFile)
+            // Step 2: Download SenseVoice tar.bz2 and extract
+            val modelFile = File(modelsDir, "$senseVoiceDir/model.int8.onnx")
+            if (!modelFile.exists()) {
+                _downloadState.value = DownloadState.Downloading(0, "SenseVoice 模型")
+                val archiveFile = File(modelsDir, senseVoiceArchive.name)
+                downloadFile(senseVoiceArchive.url, archiveFile)
+
+                _downloadState.value = DownloadState.Downloading(100, "解压模型文件...")
+                extractTarBz2(archiveFile, modelsDir)
+                archiveFile.delete() // Clean up archive
             }
 
             _downloadState.value = DownloadState.Ready
@@ -82,9 +98,10 @@ class ModelManager @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Model download failed", e)
             val msg = when {
-                e.message?.contains("HTTP") == true -> "网络请求失败: ${e.message}"
+                e.message?.contains("HTTP") == true -> "下载失败: ${e.message}"
                 e.message?.contains("timeout", true) == true -> "下载超时，请检查网络连接"
-                e.message?.contains("connect", true) == true -> "无法连接到下载服务器，请检查网络"
+                e.message?.contains("connect", true) == true -> "无法连接到下载服务器"
+                e.message?.contains("ENOSPC", true) == true -> "存储空间不足"
                 else -> "模型下载失败: ${e.message}"
             }
             _downloadState.value = DownloadState.Error(msg)
@@ -93,8 +110,6 @@ class ModelManager @Inject constructor(
     }
 
     private fun downloadFile(url: String, targetFile: File) {
-        _downloadState.value = DownloadState.Downloading(0, 0, 0)
-
         val request = Request.Builder().url(url).build()
         val response = client.newCall(request).execute()
 
@@ -119,16 +134,28 @@ class ModelManager @Inject constructor(
                         (totalRead * 100 / totalBytes).toInt()
                     } else 0
 
-                    _downloadState.value = DownloadState.Downloading(
-                        progress = progress,
-                        bytesDownloaded = totalRead,
-                        totalBytes = totalBytes
-                    )
+                    _downloadState.value = DownloadState.Downloading(progress, targetFile.name)
                 }
             }
         }
 
         Log.i(TAG, "Downloaded ${targetFile.name} (${targetFile.length()} bytes)")
+    }
+
+    private fun extractTarBz2(archiveFile: File, destDir: File) {
+        // Use Java ProcessBuilder to call tar command
+        val process = ProcessBuilder(
+            "tar", "xjf", archiveFile.absolutePath,
+            "-C", destDir.absolutePath
+        ).start()
+
+        val exitCode = process.waitFor()
+        if (exitCode != 0) {
+            val error = process.errorStream.bufferedReader().readText()
+            throw RuntimeException("解压失败 (exit code $exitCode): $error")
+        }
+
+        Log.i(TAG, "Extracted ${archiveFile.name} to ${destDir.absolutePath}")
     }
 
     fun deleteModels() {
@@ -140,7 +167,7 @@ class ModelManager @Inject constructor(
         private const val TAG = "ModelManager"
     }
 
-    private data class ModelFile(
+    private data class ModelDownload(
         val name: String,
         val url: String
     )

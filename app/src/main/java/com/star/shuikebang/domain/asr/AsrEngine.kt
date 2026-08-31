@@ -49,11 +49,11 @@ class AsrEngine @Inject constructor() {
         val asrConfig = OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
                 senseVoice = OfflineSenseVoiceModelConfig(
-                    model = "$modelDir/model.int8.onnx",
+                    model = "$modelDir/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/model.int8.onnx",
                     language = "",  // auto-detect
                     useInverseTextNormalization = true
                 ),
-                tokens = "$modelDir/tokens.txt",
+                tokens = "$modelDir/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt",
                 numThreads = 2,
                 provider = "cpu"
             )
