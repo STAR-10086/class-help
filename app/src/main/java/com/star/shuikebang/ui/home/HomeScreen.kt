@@ -214,4 +214,24 @@ fun HomeScreen(
 
 @Composable
 fun TranscriptLineItem(item: TranscriptItem) {
-    val bgColor = 
+    val bgColor = if (item.isQuestion) QuestionHighlight
+    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        if (item.isQuestion) {
+            Text(text = "\u2753 ", fontSize = 14.sp)
+        }
+        Text(
+            text = item.text,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontWeight = if (item.isQuestion) FontWeight.Bold else FontWeight.Normal
+            )
+        )
+    }
+}
