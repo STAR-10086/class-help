@@ -1,100 +1,100 @@
 package com.star.shuikebang.domain.asr
 
 import android.util.Log
-import com.k2fsa.sherpa.onnx.OfflineModelConfig
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
-import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
-import com.k2fsa.sherpa.onnx.SileroVadModelConfig
-import com.k2fsa.sherpa.onnx.Vad
-import com.k2fsa.sherpa.onnx.VadModelConfig
+import com.k2fsa.sherpa.onnx.OnlineModelConfig
+import com.k2fsa.sherpa.onnx.OnlineRecognizer
+import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OnlineStream
+import com.k2fsa.sherpa.onnx.OnlineZipformer2CtcModelConfig
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class AsrResult(
-    val text: String,
-    val isFinal: Boolean = true
-)
-
+/**
+ * 基于 sherpa-onnx OnlineRecognizer 的真流式 ASR 引擎。
+ *
+ * 使用 Zipformer-small-CTC-INT8 中文流式模型，持续接收音频，
+ * 实时输出识别文本，模型自动检测句尾断句（endpoint detection）。
+ *
+ * 流程: AudioRecord → acceptWaveform() → decode() → getResult()
+ *       → isEndpoint() → 如果是句尾: 取结果, reset stream
+ */
 @Singleton
 class AsrEngine @Inject constructor() {
 
-    private var vad: Vad? = null
-    private var recognizer: OfflineRecognizer? = null
+    private var recognizer: OnlineRecognizer? = null
+    private var stream: OnlineStream? = null
     private var isInitialized = false
 
     fun initialize(modelDir: String) {
         if (isInitialized) return
 
-        Log.i(TAG, "Initializing ASR engine with model dir: $modelDir")
+        Log.i(TAG, "Initializing streaming ASR engine: $modelDir")
 
-        // Initialize Silero VAD
-        val vadConfig = VadModelConfig(
-            sileroVadModelConfig = SileroVadModelConfig(
-                model = "$modelDir/silero_vad.onnx",
-                threshold = 0.5f,
-                minSilenceDuration = 0.8f,
-                minSpeechDuration = 0.5f,
-                windowSize = 512,
-                maxSpeechDuration = 10.0f
-            ),
-            sampleRate = SAMPLE_RATE,
-            numThreads = 2,
-            provider = "cpu",
-            debug = false
-        )
-        vad = Vad(config = vadConfig)
-
-        // Initialize SenseVoice offline recognizer
-        val asrConfig = OfflineRecognizerConfig(
-            modelConfig = OfflineModelConfig(
-                senseVoice = OfflineSenseVoiceModelConfig(
-                    model = "$modelDir/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/model.int8.onnx",
-                    language = "",  // auto-detect
-                    useInverseTextNormalization = true
+        val config = OnlineRecognizerConfig(
+            modelConfig = OnlineModelConfig(
+                zipformer2Ctc = OnlineZipformer2CtcModelConfig(
+                    model = "$modelDir/model.int8.onnx"
                 ),
-                tokens = "$modelDir/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt",
+                tokens = "$modelDir/tokens.txt",
                 numThreads = 2,
-                provider = "cpu"
-            )
+                provider = "cpu",
+                debug = false,
+                modelType = "zipformer2"
+            ),
+            enableEndpoint = true,
+            decodingMethod = "greedy_search"
         )
-        recognizer = OfflineRecognizer(config = asrConfig)
+
+        recognizer = OnlineRecognizer(config = config)
+        stream = recognizer!!.createStream()
 
         isInitialized = true
-        Log.i(TAG, "ASR engine initialized successfully")
+        Log.i(TAG, "Streaming ASR engine initialized")
     }
 
+    /**
+     * 喂入一段音频，返回识别结果列表。
+     * 如果检测到句尾断句，返回该句最终文本并自动 reset stream。
+     *
+     * @param samples 16kHz 16bit PCM 转换后的 float 数组
+     * @param callback 回调，isFinal=true 表示一个完整句子
+     */
     fun processAudioChunk(samples: FloatArray, callback: (AsrResult) -> Unit) {
-        val currentVad = vad ?: return
         val currentRecognizer = recognizer ?: return
+        val currentStream = stream ?: return
 
-        currentVad.acceptWaveform(samples)
+        currentStream.acceptWaveform(samples, SAMPLE_RATE)
 
-        while (!currentVad.empty()) {
-            val segment = currentVad.front()
-            currentVad.pop()
+        // 持续解码直到没有更多数据
+        while (currentRecognizer.isReady(currentStream)) {
+            currentRecognizer.decode(currentStream)
+        }
 
-            // Recognize this speech segment with SenseVoice
-            val stream = currentRecognizer.createStream()
-            stream.acceptWaveform(segment.samples, sampleRate = SAMPLE_RATE)
-            currentRecognizer.decode(stream)
-            val result = currentRecognizer.getResult(stream)
-            stream.release()
-
+        // 检查是否检测到句尾（endpoint）
+        if (currentRecognizer.isEndpoint(currentStream)) {
+            val result = currentRecognizer.getResult(currentStream)
             if (result.text.isNotBlank()) {
                 callback(AsrResult(text = result.text.trim(), isFinal = true))
+            }
+            // 重置 stream 以开始下一句
+            currentRecognizer.reset(currentStream)
+        } else {
+            // 非句尾时，也输出当前的部分识别结果（中间结果）
+            val result = currentRecognizer.getResult(currentStream)
+            if (result.text.isNotBlank()) {
+                callback(AsrResult(text = result.text.trim(), isFinal = false))
             }
         }
     }
 
     fun reset() {
-        vad?.reset()
+        recognizer?.reset(stream!!)
     }
 
     fun release() {
-        vad?.release()
+        stream?.release()
         recognizer?.release()
-        vad = null
+        stream = null
         recognizer = null
         isInitialized = false
     }

@@ -10,11 +10,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
-import java.util.zip.GZIPInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,6 +23,15 @@ sealed class DownloadState {
     data class Error(val message: String) : DownloadState()
 }
 
+/**
+ * 管理 Zipformer-small-CTC 流式模型的下载和存储。
+ *
+ * 模型来源: https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01
+ * 文件结构 (解压后):
+ *   sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01/
+ *     ├── model.int8.onnx   (~15 MB)
+ *     └── tokens.txt
+ */
 @Singleton
 class ModelManager @Inject constructor(
     @ApplicationContext private val context: Context
@@ -42,59 +49,49 @@ class ModelManager @Inject constructor(
     private val modelsDir: File
         get() = File(context.filesDir, "models")
 
-    // VAD model: single file download
-    private val vadFile = ModelDownload(
-        name = "silero_vad.onnx",
-        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
-    )
-
-    // SenseVoice: tar.bz2 archive
-    private val senseVoiceArchive = ModelDownload(
-        name = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2",
-        url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2"
-    )
-
-    private val senseVoiceDir = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+    // Streaming Zipformer-small-CTC INT8 (Chinese)
+    private val modelName = "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01"
+    private val archiveUrl =
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$modelName.tar.bz2"
 
     fun isModelReady(): Boolean {
-        val vad = File(modelsDir, vadFile.name)
-        val model = File(modelsDir, "$senseVoiceDir/model.int8.onnx")
-        val tokens = File(modelsDir, "$senseVoiceDir/tokens.txt")
-        return vad.exists() && model.exists() && tokens.exists()
+        val model = File(modelsDir, "$modelName/model.int8.onnx")
+        val tokens = File(modelsDir, "$modelName/tokens.txt")
+        return model.exists() && tokens.exists()
     }
 
-    fun getModelDir(): String = modelsDir.absolutePath
+    /** Returns the absolute path to the directory containing model.int8.onnx and tokens.txt */
+    fun getModelDir(): String = File(modelsDir, modelName).absolutePath
 
     suspend fun ensureModelReady(): Result<String> = withContext(Dispatchers.IO) {
         if (isModelReady()) {
             _downloadState.value = DownloadState.Ready
-            return@withContext Result.success(modelsDir.absolutePath)
+            return@withContext Result.success(getModelDir())
         }
 
         modelsDir.mkdirs()
 
         try {
-            // Step 1: Download VAD model (single file)
-            val vadTarget = File(modelsDir, vadFile.name)
-            if (!vadTarget.exists()) {
-                _downloadState.value = DownloadState.Downloading(0, "silero_vad.onnx")
-                downloadFile(vadFile.url, vadTarget)
-            }
+            val targetDir = File(modelsDir, modelName)
+            if (!targetDir.exists()) {
+                _downloadState.value = DownloadState.Downloading(0, "下载语音模型...")
 
-            // Step 2: Download SenseVoice tar.bz2 and extract
-            val modelFile = File(modelsDir, "$senseVoiceDir/model.int8.onnx")
-            if (!modelFile.exists()) {
-                _downloadState.value = DownloadState.Downloading(0, "SenseVoice 模型")
-                val archiveFile = File(modelsDir, senseVoiceArchive.name)
-                downloadFile(senseVoiceArchive.url, archiveFile)
+                // Download tar.bz2 archive
+                val archiveFile = File(modelsDir, "$modelName.tar.bz2")
+                downloadFile(archiveUrl, archiveFile)
 
+                // Extract
                 _downloadState.value = DownloadState.Downloading(100, "解压模型文件...")
                 extractTarBz2(archiveFile, modelsDir)
-                archiveFile.delete() // Clean up archive
+                archiveFile.delete()
+            }
+
+            if (!isModelReady()) {
+                throw RuntimeException("模型文件不完整: 缺少 model.int8.onnx 或 tokens.txt")
             }
 
             _downloadState.value = DownloadState.Ready
-            Result.success(modelsDir.absolutePath)
+            Result.success(getModelDir())
         } catch (e: Exception) {
             Log.e(TAG, "Model download failed", e)
             val msg = when {
@@ -143,7 +140,6 @@ class ModelManager @Inject constructor(
     }
 
     private fun extractTarBz2(archiveFile: File, destDir: File) {
-        // Use Java ProcessBuilder to call tar command
         val process = ProcessBuilder(
             "tar", "xjf", archiveFile.absolutePath,
             "-C", destDir.absolutePath
@@ -166,9 +162,4 @@ class ModelManager @Inject constructor(
     companion object {
         private const val TAG = "ModelManager"
     }
-
-    private data class ModelDownload(
-        val name: String,
-        val url: String
-    )
 }

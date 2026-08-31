@@ -34,7 +34,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -46,6 +45,16 @@ sealed class RecordingEvent {
     data class Error(val message: String) : RecordingEvent()
 }
 
+/**
+ * 前台录音服务。
+ *
+ * 音频流程:
+ *   AudioRecord (16kHz 16bit mono)
+ *   → 流式送入 AsrEngine (OnlineRecognizer)
+ *   → 检测到句尾 → 句子文本
+ *   → QuestionDetector 判断是否提问
+ *   → 存入数据库 + UI回调
+ */
 @AndroidEntryPoint
 class RecordingService : Service() {
 
@@ -83,7 +92,7 @@ class RecordingService : Service() {
         serviceScope.launch {
             val modelResult = modelManager.ensureModelReady()
             if (modelResult.isFailure) {
-                _events.emit(RecordingEvent.Error("Model download failed"))
+                _events.emit(RecordingEvent.Error("Model not ready"))
                 return@launch
             }
             asrEngine.initialize(modelManager.getModelDir())
@@ -113,8 +122,10 @@ class RecordingService : Service() {
             bufferSize * 2
         )
         audioRecord?.startRecording()
+
         recordingThread = Thread {
-            val readSize = (0.1 * SAMPLE_RATE).toInt()
+            // 每次读 300ms 音频 (4800 samples @ 16kHz)
+            val readSize = (0.3 * SAMPLE_RATE).toInt()
             val buffer = ShortArray(readSize)
             while (isRecording) {
                 val read = audioRecord?.read(buffer, 0, buffer.size) ?: -1
@@ -123,24 +134,33 @@ class RecordingService : Service() {
                     processAudioChunk(samples)
                 }
             }
-        }.apply { name = "AudioRecord-Thread"; start() }
+        }.apply {
+            name = "AudioRecord-Thread"
+            start()
+        }
     }
 
     private fun processAudioChunk(samples: FloatArray) {
         asrEngine.processAudioChunk(samples) { result ->
             serviceScope.launch {
                 if (result.text.isBlank()) return@launch
-                val questionResult = questionDetector.detect(result.text)
-                val isQuestion = questionResult.isQuestion
-                val lineId = sessionManager.addTranscriptLine(result.text, isQuestion)
-                if (isQuestion && lineId != null) {
-                    sessionManager.addQuestion(result.text, lineId)
-                    questionCount++
-                    vibrate()
-                    _events.emit(RecordingEvent.QuestionDetected(result.text))
-                    updateIslandNotification()
+
+                // 只有 final（完整句子）才存数据库
+                if (result.isFinal) {
+                    val questionResult = questionDetector.detect(result.text)
+                    val isQuestion = questionResult.isQuestion
+                    val lineId = sessionManager.addTranscriptLine(result.text, isQuestion)
+                    if (isQuestion && lineId != null) {
+                        sessionManager.addQuestion(result.text, lineId)
+                        questionCount++
+                        vibrate()
+                        _events.emit(RecordingEvent.QuestionDetected(result.text))
+                        updateIslandNotification()
+                    }
                 }
-                _events.emit(RecordingEvent.TranscriptLine(result.text, isQuestion))
+
+                // 所有结果（含中间结果）都推给 UI 展示
+                _events.emit(RecordingEvent.TranscriptLine(result.text, false))
             }
         }
     }
@@ -185,7 +205,6 @@ class RecordingService : Service() {
     }
 
     private fun createNotification(): Notification {
-        // Try island notification first
         try {
             val islandType = IslandNotificationHelper.detectIslandType(this)
             if (islandType != IslandNotificationHelper.IslandType.NONE) {
@@ -198,7 +217,7 @@ class RecordingService : Service() {
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Island notification build failed, fallback to standard: ${e.message}")
+            Log.w(TAG, "Island notification build failed, fallback: ${e.message}")
         }
         return buildStandardNotification()
     }
