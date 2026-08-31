@@ -33,10 +33,10 @@ class AsrEngine @Inject constructor() {
             sileroVadModelConfig = SileroVadModelConfig(
                 model = "$modelDir/silero_vad.onnx",
                 threshold = 0.5f,
-                minSilenceDuration = 0.25f,
-                minSpeechDuration = 0.25f,
+                minSilenceDuration = 0.8f,
+                minSpeechDuration = 0.5f,
                 windowSize = 512,
-                maxSpeechDuration = 5.0f
+                maxSpeechDuration = 10.0f
             ),
             sampleRate = SAMPLE_RATE,
             numThreads = 2,
