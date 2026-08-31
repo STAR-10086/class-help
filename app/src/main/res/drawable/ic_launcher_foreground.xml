@@ -1,0 +1,30 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Background circle -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"/>
+    <!-- Microphone icon -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,32c-3.3,0 -6,2.7 -6,6v16c0,3.3 2.7,6 6,6s6,-2.7 6,-6V38C60,34.7 57.3,32 54,32z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M66,50v-2c0,-6.6 -5.4,-12 -12,-12s-12,5.4 -12,12v2h-4v-2c0,-8.8 7.2,-16 16,-16s16,7.2 16,16v2H66z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M58,66v4c0,2.2 -1.8,4 -4,4s-4,-1.8 -4,-4v-4H58z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44,68h20v4H44z"/>
+    <!-- Question mark -->
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M70,36c0,-4.4 -3.6,-8 -8,-8s-8,3.6 -8,8c0,3 1.6,5.6 4,7l1,1v3h-2v-3c-3.2,-1.8 -5.5,-5 -5.5,-8.5c0,-5 4,-9 9,-9s9,4 9,9c0,3 -1.5,5.7 -3.8,7.3l-1.5,1c-1.5,1 -2.2,2.5 -2.2,4.2v2.5h-2v-2.5c0,-2.2 0.8,-3.8 2.2,-4.7l1.5,-1.2C70.5,40 70,38.1 70,36z"/>
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M64,55.5v3h-2v-3c0,-2.2 0.9,-3.8 2.2,-4.7l1.5,-1.2C67.5,49 68,47.1 68,45c0,-3.3 -2.7,-6 -6,-6s-6,2.7 -6,6h-2c0,-4.4 3.6,-8 8,-8s8,3.6 8,8c0,3 -1.5,5.7 -3.8,7.3l-1.5,1.2C65,54.2 64,53 64,55.5z"/>
+</vector>

@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "com.star.shuikebang"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.star.shuikebang"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
 
@@ -59,8 +59,10 @@ android {
 }
 
 dependencies {
-    // sherpa-onnx (JitPack)
-    implementation("com.github.k2-fsa:sherpa-onnx:1.13.6")
+    // sherpa-onnx (JitPack) - exclude jvm jar to avoid duplicate classes
+    implementation("com.github.k2-fsa:sherpa-onnx:1.13.6") {
+        exclude(group = "com.github.k2-fsa.sherpa.onnx", module = "sherpa-onnx-jvm")
+    }
 
     // Room
     implementation("androidx.room:room-runtime:2.6.1")
