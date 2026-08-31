@@ -29,6 +29,9 @@ class HomeViewModel @Inject constructor(
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
+    private val _liveText = MutableStateFlow("")
+    val liveText: StateFlow<String> = _liveText.asStateFlow()
+
     private val _transcriptLines = MutableStateFlow<List<TranscriptItem>>(emptyList())
     val transcriptLines: StateFlow<List<TranscriptItem>> = _transcriptLines.asStateFlow()
 
@@ -65,10 +68,16 @@ class HomeViewModel @Inject constructor(
             RecordingService.events.collect { event ->
                 when (event) {
                     is RecordingEvent.TranscriptLine -> {
+                        // final 结果：确认的句子，追加到列表并清空实时文本
+                        _liveText.value = ""
                         _transcriptLines.value = _transcriptLines.value + TranscriptItem(
                             text = event.text,
                             isQuestion = event.isQuestion
                         )
+                    }
+                    is RecordingEvent.LiveTextUpdate -> {
+                        // 中间结果：实时更新当前识别文本
+                        _liveText.value = event.text
                     }
                     is RecordingEvent.QuestionDetected -> {
                         _questionCount.value++
@@ -79,6 +88,7 @@ class HomeViewModel @Inject constructor(
                     is RecordingEvent.StatusChanged -> {
                         _isRecording.value = event.isRecording
                         if (!event.isRecording) {
+                            _liveText.value = ""
                             _transcriptLines.value = emptyList()
                             _questionCount.value = 0
                         }

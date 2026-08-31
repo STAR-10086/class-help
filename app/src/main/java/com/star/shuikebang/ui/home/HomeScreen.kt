@@ -43,6 +43,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val isRecording by viewModel.isRecording.collectAsState()
+    val liveText by viewModel.liveText.collectAsState()
     val transcriptLines by viewModel.transcriptLines.collectAsState()
     val questionCount by viewModel.questionCount.collectAsState()
     val downloadState by viewModel.downloadState.collectAsState()
@@ -160,7 +161,46 @@ fun HomeScreen(
                 else -> {}
             }
 
-            // Transcript area
+            // Live text box (current partial recognition)
+            if (isRecording && liveText.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Pulsing dot for live indicator
+                        val infiniteTransition = rememberInfiniteTransition(label = "livePulse")
+                        val dotAlpha by infiniteTransition.animateFloat(
+                            initialValue = 0.3f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(600),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "dotAlpha"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .alpha(dotAlpha)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = liveText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Confirmed sentences list
             LazyColumn(
                 state = listState,
                 modifier = Modifier

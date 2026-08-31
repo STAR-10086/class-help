@@ -41,6 +41,7 @@ import javax.inject.Inject
 
 sealed class RecordingEvent {
     data class TranscriptLine(val text: String, val isQuestion: Boolean) : RecordingEvent()
+    data class LiveTextUpdate(val text: String) : RecordingEvent()
     data class QuestionDetected(val text: String) : RecordingEvent()
     data class StatusChanged(val isRecording: Boolean) : RecordingEvent()
     data class Error(val message: String) : RecordingEvent()
@@ -160,8 +161,10 @@ class RecordingService : Service() {
                     }
                 }
 
-                // 所有结果（含中间结果）都推给 UI 展示
-                _events.emit(RecordingEvent.TranscriptLine(result.text, false))
+                // 中间结果推给 UI 实时展示（不入库）
+                if (!result.isFinal) {
+                    _events.emit(RecordingEvent.LiveTextUpdate(result.text))
+                }
             }
         }
     }
