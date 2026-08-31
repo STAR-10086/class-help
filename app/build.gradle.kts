@@ -61,7 +61,7 @@ android {
 dependencies {
     // sherpa-onnx (JitPack) - exclude jvm jar to avoid duplicate classes
     implementation("com.github.k2-fsa:sherpa-onnx:1.13.6") {
-        exclude(group = "com.github.k2-fsa.sherpa.onnx", module = "sherpa-onnx-jvm")
+        exclude(group = "com.github.k2-fsa.sherpa-onnx", module = "sherpa-onnx-jvm")
     }
 
     // Room
